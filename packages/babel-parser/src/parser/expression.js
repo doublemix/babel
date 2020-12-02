@@ -1539,6 +1539,8 @@ export default class ExpressionParser extends LValParser {
     node.properties = [];
     this.next();
 
+    const allowConditional = !isPattern;
+
     while (!this.eat(close)) {
       if (first) {
         first = false;
@@ -1549,6 +1551,14 @@ export default class ExpressionParser extends LValParser {
           this.next();
           break;
         }
+      }
+      let conditionalNode = null;
+      if (allowConditional && this.match(tt.nullishCoalescing)) {
+        conditionalNode = this.startNode();
+        this.next();
+        const condition = this.parseMaybeAssign(false, refExpressionErrors);
+        this.expect(tt.conditionalThen);
+        conditionalNode.condition = condition;
       }
 
       const prop = this.parseObjectMember(isPattern, refExpressionErrors);
@@ -1562,7 +1572,14 @@ export default class ExpressionParser extends LValParser {
         this.addExtra(prop, "shorthand", true);
       }
 
-      node.properties.push(prop);
+      let nodeProp = prop;
+      if (conditionalNode) {
+        conditionalNode.property = prop;
+        nodeProp = conditionalNode;
+        this.finishNode(conditionalNode, "ObjectConditionalElement");
+      }
+
+      node.properties.push(nodeProp);
     }
 
     let type = "ObjectExpression";
@@ -1747,6 +1764,27 @@ export default class ExpressionParser extends LValParser {
     refExpressionErrors: ?ExpressionErrors,
   ): ?N.ObjectProperty {
     prop.shorthand = false;
+
+    if (!isPattern && this.eat(tt.nullishCoalescing)) {
+      // conditional syntax
+      // TODO check for end of object property for complete shorthand
+      if (this.match(tt.comma) || this.match(tt.braceR)) {
+        // complete shorthand
+        if (prop.computed || prop.key.type !== "Identifier") {
+          // illegal shortand
+          throw this.unexpected();
+        }
+        prop.value = prop.key.__clone();
+        prop.shorthand = true;
+        prop.shorthandCondition = true;
+
+        return this.finishNode(prop, "ObjectConditionalProperty");
+      }
+      const conditionValue = this.parseMaybeAssign(false, refExpressionErrors);
+      prop.value = conditionValue;
+      prop.shorthandCondition = true;
+      return this.finishNode(prop, "ObjectConditionalProperty");
+    }
 
     if (this.eat(tt.colon)) {
       prop.value = isPattern
@@ -2058,6 +2096,9 @@ export default class ExpressionParser extends LValParser {
     const elts = [];
     let first = true;
 
+    // TODO using allowEmpty to indicate in array expression
+    const allowConditional = allowEmpty;
+
     while (!this.eat(close)) {
       if (first) {
         first = false;
@@ -2076,7 +2117,43 @@ export default class ExpressionParser extends LValParser {
         }
       }
 
-      elts.push(this.parseExprListItem(allowEmpty, refExpressionErrors));
+      let conditionalNode = null;
+      let requireItem = true;
+      if (allowConditional && this.match(tt.nullishCoalescing)) {
+        conditionalNode = this.startNode();
+        // conditional element
+        this.next();
+
+        const conditionOrValue = this.parseMaybeAssign(
+          false,
+          refExpressionErrors,
+        );
+
+        if (this.eat(tt.conditionalThen)) {
+          // conditional element value
+          conditionalNode.condition = conditionOrValue;
+          conditionalNode.shorthandCondition = false;
+        } else {
+          conditionalNode.value = conditionOrValue;
+          conditionalNode.shorthandCondition = true;
+          requireItem = false;
+        }
+      }
+
+      let elt = null;
+      if (requireItem) {
+        elt = this.parseExprListItem(allowEmpty, refExpressionErrors);
+      }
+
+      if (conditionalNode && requireItem) {
+        conditionalNode.item = elt;
+      }
+      if (conditionalNode) {
+        elt = conditionalNode;
+        this.finishNode(conditionalNode, "ConditionalElement");
+      }
+
+      elts.push(elt);
     }
     return elts;
   }

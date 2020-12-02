@@ -598,6 +598,11 @@ export default class Tokenizer extends ParserErrors {
     // '+-'
     const next = this.input.charCodeAt(this.state.pos + 1);
 
+    if (code === charCodes.dash && next === charCodes.greaterThan) {
+      this.finishOp(tt.conditionalThen, 2);
+      return;
+    }
+
     if (next === code) {
       if (
         next === charCodes.dash &&

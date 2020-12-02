@@ -161,6 +161,7 @@ export const types: { [name: string]: TokenType } = {
     binop: 11,
     rightAssociative: true,
   }),
+  conditionalThen: new TokenType("->"),
 
   // Keywords
   // Don't forget to update packages/babel-helper-validator-identifier/src/keyword.js
